@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import * as XLSX from "xlsx";
 
 const SalesList = ({ onEditSale }) => {
   const { t } = useTranslation();
@@ -98,7 +99,7 @@ const SalesList = ({ onEditSale }) => {
       if (categoryFilter) params.append('category', categoryFilter);
       if (dateFilter) params.append('startDate', dateFilter);
 
-      // Fetch aggregated data
+      // Fetch aggregated data from database
       const response = await fetch(`http://localhost:3001/api/sales/aggregated?${params}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -106,35 +107,44 @@ const SalesList = ({ onEditSale }) => {
 
       const aggregatedData = await response.json();
 
-      // Create CSV content
-      const headers = ['Product ID', 'Product Name', 'Category', 'Total Products Sold', 'Price', 'Total Prices'];
-      const csvRows = [headers.join(',')];
-
-      for (const item of aggregatedData) {
-        const row = [
-          item.product_id || '',
-          `"${item.product_name}"`, // Quotes to handle commas in names
-          `"${item.category}"`,
-          item.total_product_sold,
-          item.price.toFixed(2),
-          item.total_prices.toFixed(2)
-        ];
-        csvRows.push(row.join(','));
+      if (!aggregatedData || aggregatedData.length === 0) {
+        alert('No data to export');
+        return;
       }
 
-      // Create and download CSV file
-      const csvContent = csvRows.join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
+      // Prepare data for Excel export with exact column names
+      const excelData = aggregatedData.map(item => ({
+        'product_id': item.product_id || '',
+        'product_name': item.product_name,
+        'category_name': item.category,
+        'number_of_all_sold_items': item.total_product_sold,
+        'price_unit': Number.parseFloat(item.price).toFixed(2),
+        'total_price': Number.parseFloat(item.total_prices).toFixed(2)
+      }));
 
-      link.setAttribute('href', url);
-      link.setAttribute('download', `aggregated_sales_${new Date().toISOString().split('T')[0]}.csv`);
-      link.style.visibility = 'hidden';
+      // Create workbook and worksheet
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Aggregated Sales');
 
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Auto-size columns
+      const maxWidth = 50;
+      const columnWidths = Object.keys(excelData[0]).map(key => {
+        const maxLength = Math.max(
+          key.length,
+          ...excelData.map(row => String(row[key]).length)
+        );
+        return { wch: Math.min(maxLength + 2, maxWidth) };
+      });
+      worksheet['!cols'] = columnWidths;
+
+      // Generate filename with current date
+      const filename = `aggregated_sales_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      // Download the file
+      XLSX.writeFile(workbook, filename);
+
+      console.log(`✅ Exported ${aggregatedData.length} aggregated sales records`);
 
     } catch (error) {
       console.error('Error exporting aggregated sales:', error);
@@ -208,7 +218,7 @@ const SalesList = ({ onEditSale }) => {
             onClick={handleExportAggregated}
             disabled={exporting}
             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Export Aggregated Sales"
+            title="Export Aggregated Sales to Excel"
           >
             {exporting ? (
               <>
@@ -220,7 +230,7 @@ const SalesList = ({ onEditSale }) => {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <span>Export CSV</span>
+                <span>Export Excel</span>
               </>
             )}
           </button>
